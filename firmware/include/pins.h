@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-// I2S (shared bus for both SPH0645 mics)
+// I2S (shared bus for both INMP441 mics)
 constexpr int PIN_I2S_BCLK = 2;   // D2
 constexpr int PIN_I2S_WS   = 1;   // D1
 constexpr int PIN_I2S_DIN  = 0;   // D0

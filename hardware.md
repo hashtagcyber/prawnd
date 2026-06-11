@@ -8,6 +8,6 @@ A start/stop button is used to start/stop recording
 
 ## Hardware
 - 1x Seeed Studio XIAO ESP32C6
-- 2x SPH0645
+- 2x INMP441
 - 1x WWZMDiB 6 Pcs Micro SD TF Card Adapter Mini Reader Module 3.3V 6 Pin SPI Interface
 - 1x button
