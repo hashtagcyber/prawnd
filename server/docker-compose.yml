@@ -1,0 +1,13 @@
+services:
+  prawnd:
+    build: .
+    container_name: prawnd
+    ports:
+      - "8080:8080"
+    environment:
+      PRAWND_API_KEY: ${PRAWND_API_KEY:-change-me}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

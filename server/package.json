@@ -1,0 +1,18 @@
+{
+  "name": "prawnd-server",
+  "version": "0.1.0",
+  "description": "Store-and-index webservice for Prawnd voice recorders",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "fastify": "^5.1.0",
+    "ulid": "^2.3.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

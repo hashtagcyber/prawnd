@@ -1,0 +1,9 @@
+.DS_Store
+firmware/.pio/
+firmware/.pioenvs/
+firmware/.vscode/
+firmware/.cache/
+server/node_modules/
+server/data/
+server/.env
+*.log
