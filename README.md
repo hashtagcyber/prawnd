@@ -8,6 +8,22 @@ to a webserver you configure on-device.
 - **Firmware** — Arduino-ESP32 via PlatformIO. Source in [`firmware/`](firmware/).
 - **Webservice** — Node.js + Fastify, SQLite-indexed, Dockerized. Source in [`server/`](server/).
 
+> [!CAUTION]
+> ## 🔓 HTTPS uploads use `setInsecure()` — TLS certificate validation is OFF
+>
+> When the configured Upload URL is `https://…`, the firmware uploads with
+> `WiFiClientSecure::setInsecure()` (`firmware/src/uploader.cpp`), which **does
+> the TLS handshake but does NOT validate the server's certificate**. The
+> connection is encrypted, but there is **no protection against a
+> man-in-the-middle**: anyone who can intercept the device's traffic can present
+> a forged certificate, decrypt the upload, and **steal the API key** (which the
+> device sends as `Authorization: Bearer …`).
+>
+> This is a **beta convenience only.** Before any non-hobby/production use, pin a
+> CA bundle (e.g. ISRG Root X1) via `setCACert()` and remove `setInsecure()`, and
+> treat each device's API key as compromised if its network is ever untrusted.
+> Rotate keys in the web UI if in doubt.
+
 ## Quick start
 
 ```bash
@@ -127,8 +143,14 @@ pio device monitor               # 115200 baud (configured in platformio.ini)
 3. Open `http://192.168.4.1`.
 4. Enter:
    - WiFi SSID + password (your home/office WiFi)
-   - Upload URL (e.g. `http://<your-mac-IP>:8080/upload`)
-   - API key (must match the server's `PRAWND_API_KEY`)
+   - Upload URL — either:
+     - **Local server:** `http://<your-mac-IP>:8080/upload` (plain HTTP), or
+     - **Hosted beta:** `https://prawnd.dev.cobl.io/upload` (HTTPS — see the
+       certificate-validation caution at the top of this README).
+   - API key:
+     - Local server: must match the server's `PRAWND_API_KEY`.
+     - Hosted beta: log in at `https://prawnd.dev.cobl.io` with cobl.io and
+       generate an **upload key** under *API keys*.
    - Device id (optional; auto-derived from MAC)
 5. Hit **Save and reboot**. The device reconnects in STA mode.
 
