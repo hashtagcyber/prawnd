@@ -7,6 +7,7 @@
 - 1× momentary push-button (any small tactile switch)
 - 2× 100 nF ceramic capacitors (decoupling, one per mic)
 - A short jumper wire from `3V3` to one mic's `L/R` and from `GND` to the other's `L/R`
+- *(optional)* 1× MAX17048 LiPo fuel-gauge breakout + a single-cell LiPo — only for the battery-monitoring addon (see [Battery fuel gauge](#battery-fuel-gauge--max17048-optional-addon))
 
 ## Pin map
 
@@ -22,6 +23,8 @@
 | `D10` | 18 | OUT | SD MOSI (a.k.a. DI) | Default SPI MOSI. |
 | `D3` | 21 | OUT | SD CS | Software-controlled. |
 | `D7` | 17 | IN  | Button (other leg → GND) | Firmware sets `INPUT_PULLUP`, active-low. |
+| `D4` | 22 | I/O | Fuel-gauge SDA *(optional)* | I²C data — **only** for the battery-monitoring addon. Unused by the base firmware. |
+| `D5` | 23 | I/O | Fuel-gauge SCL *(optional)* | I²C clock — **only** for the battery-monitoring addon. Unused by the base firmware. |
 
 ### Mic L/R strapping (this picks left vs right)
 - **Mic-L**: `L/R → GND` → drives the **left** (WS-low) I²S slot
@@ -159,6 +162,58 @@ Push button  leg A    --- D7       (GPIO17, INPUT_PULLUP in firmware)
              leg B    --- GND
 ```
 
+### Battery fuel gauge — MAX17048 (optional addon)
+
+Only needed if you flash the `xiao_esp32c6_batt` firmware. Skip this entire
+section for the standard USB-powered build — `D4`/`D5` stay unused.
+
+The gauge sits **inline between the LiPo and the XIAO's BAT pads** (on the
+underside of the board) and reports state-of-charge over I²C. It needs no
+sense resistor — it's a voltage-based ModelGauge part.
+
+```mermaid
+flowchart LR
+    BATT[(LiPo cell)]
+    subgraph FG[MAX17048 gauge]
+        FV[VDD]
+        FG2[GND]
+        FSDA[SDA]
+        FSCL[SCL]
+        FBIN[BAT in]
+        FBOUT[BAT out]
+    end
+    subgraph XIAO[XIAO ESP32C6]
+        X3V3[3V3]
+        XGND[GND]
+        XD4[D4 / GPIO22]
+        XD5[D5 / GPIO23]
+        XBAT[BAT pads -]
+    end
+    BATT --- FBIN
+    FBOUT --- XBAT
+    X3V3 --- FV
+    XGND --- FG2
+    XD4 --- FSDA
+    XD5 --- FSCL
+```
+
+```
+MAX17048   VDD      --- 3V3      (XIAO 3V3 rail)
+           GND      --- GND      (XIAO GND rail)
+           SDA      --- D4       (GPIO22, I2C SDA)   [optional]
+           SCL      --- D5       (GPIO23, I2C SCL)   [optional]
+           BAT in   --- LiPo +   (cell connects to the gauge)
+           BAT out  --- XIAO BAT+ pad (underside)
+LiPo -     --------------- XIAO BAT- pad (underside)
+```
+
+Notes:
+- `D4`/`D5` are the XIAO's default I²C pins and are free in the base wiring.
+- The MAX17048 I²C address is `0x36`; the firmware reads the `VCELL` (voltage)
+  and `SOC` (percent) registers directly — no extra library.
+- If no gauge is fitted (or you flash the base firmware), the device behaves
+  exactly as before and simply reports `battery: n/a` on the config page.
+
 ## XIAO ESP32C6 pinout reference
 
 ```
@@ -169,8 +224,8 @@ Push button  leg A    --- D7       (GPIO17, INPUT_PULLUP in firmware)
    I2S WS     D1 --|                       |-- D9   SD MISO/DO
    I2S BCLK   D2 --|                       |-- D8   SD CLK/SCK
    SD CS      D3 --|                       |-- D7   BUTTON
-              D4 --|                       |-- D6
-              D5 --|                       |
+  SDA (opt)   D4 --|                       |-- D6
+  SCL (opt)   D5 --|                       |
                     +-----------------------+
 ```
 

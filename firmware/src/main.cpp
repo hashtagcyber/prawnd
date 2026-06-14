@@ -12,6 +12,7 @@
 #include "audio.h"
 #include "wav.h"
 #include "uploader.h"
+#include "battery.h"
 
 enum class State { Boot, ApPortal, StaIdle, Recording, Uploading };
 
@@ -191,6 +192,16 @@ void setup() {
                   (uint32_t)((SD.totalBytes() - SD.usedBytes()) / 1024 / 1024));
     ensureDirs();
   }
+
+#ifdef ENABLE_BATTERY
+  if (batteryBegin()) {
+    BatteryReading b;
+    if (batteryRead(b)) Serial.printf("Battery gauge: %d%% (%d mV)\n", b.percent, b.millivolts);
+    else                Serial.println("Battery gauge present but read failed");
+  } else {
+    Serial.println("Battery gauge not detected on I2C (addon build)");
+  }
+#endif
 
   bool ok = loadConfig(cfg);
   Serial.printf("Config: ssid=%s url=%s dev=%s\n",

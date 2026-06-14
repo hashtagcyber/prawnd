@@ -137,6 +137,25 @@ pio run -t upload --upload-port /dev/cu.usbmodem<TAB>
 pio device monitor               # 115200 baud (configured in platformio.ini)
 ```
 
+### Optional: battery-monitoring addon
+
+A second PlatformIO env, **`xiao_esp32c6_batt`**, compiles in an optional
+MAX17048 LiPo fuel-gauge driver. The base `xiao_esp32c6` build is unchanged — the
+addon is purely a compile-time flag (`-DENABLE_BATTERY`), so the standard
+USB-powered firmware carries no battery code.
+
+```bash
+pio run -e xiao_esp32c6_batt              # build the battery variant
+pio run -e xiao_esp32c6_batt -t upload    # build + flash it
+```
+
+Wire a MAX17048 breakout to the XIAO's I²C pins (`D4`=SDA, `D5`=SCL) and the BAT
+pads — see [`hardware/wiring.md`](hardware/wiring.md#battery-fuel-gauge--max17048-optional-addon).
+When a gauge is detected, `GET /status` gains `batt_pct` and `batt_mv` fields and
+the config page shows the charge level; with no gauge fitted it reports
+`battery: n/a` and behaves identically to the base firmware. The artifact lands
+at `.pio/build/xiao_esp32c6_batt/firmware.bin`.
+
 ### First-time WiFi + upload setup
 1. After flash, the device has no NVS config → it boots into AP mode.
 2. From a phone or laptop, join the WiFi network **`Prawnd-XXXX`** (password `prawnd1234`, where `XXXX` is the last 4 hex of the MAC).
@@ -197,7 +216,8 @@ prawnd/
 ├── firmware/
 │   ├── platformio.ini
 │   ├── include/pins.h
-│   └── src/                   # main, audio, wav, sd, wifi, portal, uploader, button, config
+│   └── src/                   # main, audio, wav, sd, wifi, portal, uploader, button, config,
+│                              #   battery (optional MAX17048 addon, -DENABLE_BATTERY)
 └── server/
     ├── Dockerfile
     ├── docker-compose.yml
@@ -206,3 +226,10 @@ prawnd/
     └── src/                   # server.js, db.js, auth.js, wav.js,
                                #   routes/ (upload, recordings, health, ui)
 ```
+
+## Hardware Links
+I purchased the following parts on Amazon:
+- https://a.co/d/0gR9T4nS
+- https://a.co/d/04cU7Vte
+- https://a.co/d/02JYXZO7
+- https://a.co/d/06rkL2Dp

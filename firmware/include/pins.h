@@ -14,3 +14,10 @@ constexpr int PIN_SD_CS    = 21;  // D3
 
 // Button (active-low with internal pull-up)
 constexpr int PIN_BUTTON   = 17;  // D7
+
+// Battery fuel gauge (optional addon — MAX17048 over I2C).
+// Only used when the firmware is built with -DENABLE_BATTERY
+// (the `xiao_esp32c6_batt` PlatformIO env). These are the XIAO's default
+// I2C pins and are otherwise unused by the base firmware.
+constexpr int PIN_BATT_SDA = 22;  // D4
+constexpr int PIN_BATT_SCL = 23;  // D5

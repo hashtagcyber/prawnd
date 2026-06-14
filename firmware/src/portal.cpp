@@ -2,6 +2,7 @@
 #include <ESPAsyncWebServer.h>
 #include <SD.h>
 #include <WiFi.h>
+#include "battery.h"
 
 static AsyncWebServer server(80);
 static Config *configPtr = nullptr;
@@ -18,7 +19,7 @@ button{margin-top:1rem;padding:.6rem 1rem;font:inherit}
 code{background:#eef;padding:.1rem .3rem;border-radius:3px}</style>
 </head><body>
 <h1>Prawnd</h1>
-<p>Device <code id="d">?</code> &middot; mode <code id="s">?</code> &middot; ip <code id="i">?</code></p>
+<p>Device <code id="d">?</code> &middot; mode <code id="s">?</code> &middot; ip <code id="i">?</code> &middot; battery <code id="b">?</code></p>
 <form method="POST" action="/save">
 <label>WiFi SSID</label><input name="ssid" value="__SSID__" required>
 <label>WiFi password (leave blank to keep current)</label><input name="psk" type="password" placeholder="********">
@@ -32,6 +33,7 @@ fetch('/status').then(r=>r.json()).then(j=>{
   document.getElementById('d').textContent=j.device_id||'?';
   document.getElementById('s').textContent=j.mode||'?';
   document.getElementById('i').textContent=j.ip||'?';
+  document.getElementById('b').textContent=(j.batt_pct!=null)?(j.batt_pct+'% ('+j.batt_mv+' mV)'):'n/a';
 }).catch(()=>{});
 </script>
 </body></html>
@@ -65,6 +67,13 @@ void portalBegin(Config *cfg) {
     s += "\"mode\":\"" + String(isAp ? "ap" : "sta") + "\",";
     s += "\"ip\":\""   + ip + "\",";
     s += "\"sd_free_mb\":" + String((uint32_t)(sdFree / 1024 / 1024));
+    // Battery fields appear only when the fuel-gauge addon is built in AND a
+    // gauge is actually present on the bus; otherwise they're omitted entirely.
+    BatteryReading bat;
+    if (batteryRead(bat)) {
+      s += ",\"batt_pct\":" + String(bat.percent);
+      s += ",\"batt_mv\":"  + String(bat.millivolts);
+    }
     s += "}";
     req->send(200, "application/json", s);
   });
