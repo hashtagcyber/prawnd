@@ -13,6 +13,7 @@
 #include "wav.h"
 #include "uploader.h"
 #include "battery.h"
+#include "ble_sync.h"
 
 enum class State { Boot, ApPortal, StaIdle, Recording, Uploading };
 
@@ -217,6 +218,10 @@ void setup() {
     portalBegin(&cfg);
     state = State::ApPortal;
   }
+
+  // BLE sync runs in every state except Recording, so a phone can pull queued
+  // recordings even when WiFi was never configured (the phone is the uplink).
+  bleSyncBegin(cfg.device_id);
 }
 
 void loop() {
@@ -225,6 +230,11 @@ void loop() {
     clearConfig();
     delay(200);
     ESP.restart();
+  }
+
+  if (buttonTriplePressed() && state != State::Recording) {
+    Serial.println("Triple press: opening BLE pairing window");
+    bleSyncEnterPairing();
   }
 
   if (portalSaveRequested()) {
@@ -238,13 +248,17 @@ void loop() {
       delay(20);
       break;
     case State::ApPortal:
-      // Just service portal; ignore button until WiFi is configured.
+      // Service portal + BLE sync; ignore button until WiFi is configured.
+      bleSyncService();
       delay(20);
       break;
     case State::StaIdle:
+      bleSyncService();
       if (buttonShortPressed()) {
         startRecording();
-      } else if (firstDrain || (millis() - lastDrainAt > 60000)) {
+      } else if (!bleSyncBusy() && (firstDrain || (millis() - lastDrainAt > 60000))) {
+        // Hold off the WiFi drain while a phone is connected — let the BLE
+        // sync own the /pending queue so the two transports don't race.
         firstDrain = false;
         lastDrainAt = millis();
         state = State::Uploading;
