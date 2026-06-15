@@ -4,7 +4,7 @@ An ESP32-based, Plaud-style voice recorder. Press a button to start/stop recordi
 the device captures 16 kHz stereo audio to an SD card and POSTs each finished WAV
 to a webserver you configure on-device.
 
-- **Hardware** — Seeed XIAO ESP32C6, 2× SPH0645 I²S mics (stereo), SPI microSD adapter, push-button. Wiring diagrams live in [`hardware/wiring.md`](hardware/wiring.md).
+- **Hardware** — Seeed XIAO ESP32C6, 2× INMP441 I²S mics (stereo), SPI microSD adapter, push-button. Wiring diagrams live in [`hardware/wiring.md`](hardware/wiring.md).
 - **Firmware** — Arduino-ESP32 via PlatformIO. Source in [`firmware/`](firmware/).
 - **Webservice** — Node.js + Fastify, SQLite-indexed, Dockerized. Source in [`server/`](server/).
 

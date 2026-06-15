@@ -6,13 +6,18 @@ static const char *NS = "prawnd";
 
 bool loadConfig(Config &cfg) {
   Preferences p;
-  if (!p.begin(NS, true)) return false;
-  cfg.ssid       = p.getString("ssid", "");
-  cfg.psk        = p.getString("psk", "");
-  cfg.upload_url = p.getString("url", "");
-  cfg.api_key    = p.getString("key", "");
-  cfg.device_id  = p.getString("dev", "");
-  p.end();
+  // On a fresh/erased device the namespace doesn't exist yet and begin() fails;
+  // that's fine — we still fall through and derive a device id below. (Don't
+  // early-return here, or device_id stays empty and the BLE name / AP SSID come
+  // up nameless.)
+  if (p.begin(NS, true)) {
+    cfg.ssid       = p.getString("ssid", "");
+    cfg.psk        = p.getString("psk", "");
+    cfg.upload_url = p.getString("url", "");
+    cfg.api_key    = p.getString("key", "");
+    cfg.device_id  = p.getString("dev", "");
+    p.end();
+  }
   if (!cfg.device_id.length()) cfg.device_id = defaultDeviceId();
   return cfg.valid();
 }
@@ -38,9 +43,10 @@ void clearConfig() {
 }
 
 String defaultDeviceId() {
-  uint8_t mac[6] = {0};
-  WiFi.macAddress(mac);
+  // Use the factory eFuse MAC, not WiFi.macAddress(): this runs at boot before
+  // WiFi is initialized, where WiFi.macAddress() reads back all-zeros.
+  uint64_t mac = ESP.getEfuseMac();
   char buf[16];
-  snprintf(buf, sizeof(buf), "prawnd-%02X%02X", mac[4], mac[5]);
+  snprintf(buf, sizeof(buf), "prawnd-%04X", (uint16_t)(mac >> 32));
   return String(buf);
 }
