@@ -1,30 +1,28 @@
 #include <Arduino.h>
 #include <SD.h>
 #include <SPI.h>
-#include <WiFi.h>
+#include <NimBLEDevice.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/stream_buffer.h>
 #include "pins.h"
 #include "config.h"
-#include "wifi_mgr.h"
-#include "portal.h"
 #include "button.h"
 #include "audio.h"
 #include "wav.h"
-#include "uploader.h"
 #include "battery.h"
 #include "ble_sync.h"
 
-enum class State { Boot, ApPortal, StaIdle, Recording, Uploading };
+// Post-WiFi-removal state machine: the phone (over BLE) is the sole uplink.
+//   Boot      transient pre-init state
+//   Idle      advertising + serving BLE sync; short press -> record
+//   Recording capturing audio to SD via two FreeRTOS tasks; BLE not serviced
+enum class State { Boot, Idle, Recording };
 
 static State    state = State::Boot;
 static Config   cfg;
 static File     recFile;
 static String   recPath;
 static volatile uint32_t recordedBytes = 0;
-static String   pendingUploadPath;
-static uint32_t lastDrainAt = 0;
-static bool     firstDrain  = true;
 
 // --- Recording pipeline (FreeRTOS) ----------------------------------------
 // audioReaderTask: blocks on I2S, applies filters, pushes int16 frames into a
@@ -71,28 +69,42 @@ static void ensureDirs() {
   if (!SD.exists(UPLOADED_DIR)) SD.mkdir(UPLOADED_DIR);
 }
 
-static String findFirstPending() {
+static bool isRecordingName(const String &base) {
+  return base.length() && !base.startsWith(".") && base.endsWith(".wav");
+}
+
+// Count valid pending WAVs for the advertised PENDING bit/count.
+static uint32_t countPending() {
+  if (SD.cardType() == CARD_NONE) return 0;
   File dir = SD.open(PENDING_DIR);
-  if (!dir) return String();
-  String name;
-  while (true) {
-    File entry = dir.openNextFile();
-    if (!entry) break;
-    String n = String(entry.name());
-    entry.close();
-    // Skip macOS AppleDouble sidecars (._foo.wav) and anything that doesn't
-    // look like one of our recordings. Without this guard the device retries
-    // ._<file>.wav forever and the server replies 400 every time.
-    int slash = n.lastIndexOf('/');
-    String base = slash >= 0 ? n.substring(slash + 1) : n;
-    if (!base.length() || base.startsWith(".") || !base.endsWith(".wav")) continue;
-    name = n;
-    break;
+  uint32_t count = 0;
+  if (dir) {
+    while (true) {
+      File entry = dir.openNextFile();
+      if (!entry) break;
+      String n = String(entry.name());
+      entry.close();
+      int slash = n.lastIndexOf('/');
+      String base = slash >= 0 ? n.substring(slash + 1) : n;
+      if (isRecordingName(base)) count++;
+    }
+    dir.close();
   }
-  dir.close();
-  if (!name.length()) return String();
-  if (name.startsWith("/")) return name;
-  return PENDING_DIR + "/" + name;
+  return count;
+}
+
+static uint8_t batteryPct() {
+#ifdef ENABLE_BATTERY
+  BatteryReading b;
+  if (batteryRead(b) && b.percent >= 0 && b.percent <= 100) return (uint8_t)b.percent;
+#endif
+  return 0xFF;  // unknown
+}
+
+// Recompute the advertised pending count + battery and re-advertise (sets the
+// PENDING flag bit and the fast/slow interval). Main-loop only.
+static void updatePendingAdvertising() {
+  bleSyncUpdatePending(countPending(), batteryPct());
 }
 
 static void startRecording() {
@@ -145,33 +157,13 @@ static void stopRecording() {
   }
   String target = PENDING_DIR + "/" + String(millis()) + ".wav";
   SD.rename(recPath, target);
-  pendingUploadPath = target;
-  state = State::Uploading;
+  state = State::Idle;
   Serial.printf("Stopped, queued %s (%u bytes)\n", target.c_str(), (unsigned)total);
-}
 
-static void tryUploadOnce() {
-  if (!pendingUploadPath.length()) {
-    pendingUploadPath = findFirstPending();
-  }
-  if (!pendingUploadPath.length()) {
-    state = State::StaIdle;
-    return;
-  }
-  int code = uploadFile(cfg, pendingUploadPath);
-  Serial.printf("Upload %s -> %d\n", pendingUploadPath.c_str(), code);
-  if (code >= 200 && code < 300) {
-    int slash = pendingUploadPath.lastIndexOf('/');
-    String name = pendingUploadPath.substring(slash + 1);
-    String dest = UPLOADED_DIR + "/" + name;
-    if (SD.exists(dest)) SD.remove(dest);
-    SD.rename(pendingUploadPath, dest);
-    pendingUploadPath = "";
-  } else {
-    // Leave the file in /pending for the next retry tick.
-    pendingUploadPath = "";
-  }
-  state = State::StaIdle;
+  // New pending file: set the PENDING adv bit + fast interval so the phone
+  // wakes and drains. (The CRC of the new file is computed lazily on LIST/GET
+  // and cached then — acceptable on the small pending queue.)
+  updatePendingAdvertising();
 }
 
 void setup() {
@@ -204,30 +196,23 @@ void setup() {
   }
 #endif
 
-  bool ok = loadConfig(cfg);
-  Serial.printf("Config: ssid=%s url=%s dev=%s\n",
-                cfg.ssid.c_str(), cfg.upload_url.c_str(), cfg.device_id.c_str());
+  loadConfig(cfg);  // device_id only
+  Serial.printf("Config: dev=%s\n", cfg.device_id.c_str());
 
-  if (ok && wifiTryStation(cfg.ssid, cfg.psk)) {
-    Serial.printf("STA up, IP %s\n", wifiCurrentIp().c_str());
-    portalBegin(&cfg);
-    state = State::StaIdle;
-  } else {
-    Serial.println("Starting AP captive portal");
-    wifiStartAp(cfg.device_id);
-    portalBegin(&cfg);
-    state = State::ApPortal;
-  }
-
-  // BLE sync runs in every state except Recording, so a phone can pull queued
-  // recordings even when WiFi was never configured (the phone is the uplink).
+  // BLE is the sole uplink. Sets up the GATT service (CTRL/STAT/DATA/CFG),
+  // security (Just-Works bonding), the resolving list, and starts advertising.
   bleSyncBegin(cfg.device_id);
+  // Reflect the pending queue in the advertisement at boot.
+  updatePendingAdvertising();
+
+  state = State::Idle;
 }
 
 void loop() {
   if (buttonLongPressed()) {
     Serial.println("Long press: factory reset");
     clearConfig();
+    NimBLEDevice::deleteAllBonds();  // bonds live in a separate NVS namespace
     delay(200);
     ESP.restart();
   }
@@ -237,46 +222,27 @@ void loop() {
     bleSyncEnterPairing();
   }
 
-  if (portalSaveRequested()) {
-    Serial.println("Config saved; rebooting");
-    delay(1000);
-    ESP.restart();
-  }
-
   switch (state) {
     case State::Boot:
       delay(20);
       break;
-    case State::ApPortal:
-      // Service portal + BLE sync; ignore button until WiFi is configured.
-      bleSyncService();
-      delay(20);
-      break;
-    case State::StaIdle:
-      bleSyncService();
+    case State::Idle:
+      bleSyncService();  // advances LIST/GET window/ACK/CFG + pairing timer
       if (buttonShortPressed()) {
         startRecording();
-      } else if (!bleSyncBusy() && (firstDrain || (millis() - lastDrainAt > 60000))) {
-        // Hold off the WiFi drain while a phone is connected — let the BLE
-        // sync own the /pending queue so the two transports don't race.
-        firstDrain = false;
-        lastDrainAt = millis();
-        state = State::Uploading;
       } else {
-        delay(20);
+        delay(5);  // tight loop so the streaming window stays fed
       }
       break;
     case State::Recording:
-      // Audio + SD writes happen in background tasks; main loop just waits
-      // for the user to press the button again.
+      // Audio + SD writes happen in background tasks; BLE is intentionally NOT
+      // serviced here (no SD contention). A connected phone's in-flight GET
+      // times out and resumes after recording stops.
       if (buttonShortPressed()) {
         stopRecording();
       } else {
         delay(20);
       }
-      break;
-    case State::Uploading:
-      tryUploadOnce();
       break;
   }
 }
