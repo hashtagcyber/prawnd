@@ -1,5 +1,6 @@
 #include "ble_sync.h"
 #include "config.h"
+#include "sd_mount.h"
 #include <NimBLEDevice.h>
 #include <ArduinoJson.h>
 #include <SD.h>
@@ -160,6 +161,27 @@ static void crcCacheInsert(const String &name, uint32_t size, uint32_t crc) {
 static bool fileCrc32(const String &path, const String &name, uint32_t size,
                       uint32_t &outCrc) {
   if (crcCacheLookup(name, size, outCrc)) return true;
+  // Sidecar "<path>.crc" ("<size> <crc8hex>"): persists the CRC across
+  // reboots, so the first LIST after power-up doesn't have to re-stream a
+  // multi-hundred-KB file at SD-SPI speed (seconds of full-power awake time,
+  // and the phone's LIST deadline). Written below on first compute; dropped
+  // with the recording on ACK.
+  String side = path + ".crc";
+  File sf = SD.open(side, FILE_READ);
+  if (sf) {
+    String line = sf.readStringUntil('\n');
+    sf.close();
+    int sp = line.indexOf(' ');
+    if (sp > 0) {
+      uint32_t sideSize = (uint32_t)strtoul(line.substring(0, sp).c_str(), nullptr, 10);
+      uint32_t sideCrc  = (uint32_t)strtoul(line.substring(sp + 1).c_str(), nullptr, 16);
+      if (sideSize == size) {
+        outCrc = sideCrc;
+        crcCacheInsert(name, size, sideCrc);
+        return true;
+      }
+    }
+  }
   File f = SD.open(path, FILE_READ);
   if (!f) return false;
   static uint8_t rbuf[4096];
@@ -174,6 +196,11 @@ static bool fileCrc32(const String &path, const String &name, uint32_t size,
   f.close();
   outCrc = crc;
   crcCacheInsert(name, size, crc);
+  File wf = SD.open(side, FILE_WRITE);
+  if (wf) {
+    wf.printf("%u %08x\n", (unsigned)size, (unsigned)crc);
+    wf.close();
+  }
   return true;
 }
 
@@ -197,30 +224,14 @@ static bool validName(const String &name) {
   return true;
 }
 
-static uint32_t countPending() {
-  if (SD.cardType() == CARD_NONE) return 0;
-  File dir = SD.open(PENDING_DIR);
-  uint32_t count = 0;
-  if (dir) {
-    while (true) {
-      File entry = dir.openNextFile();
-      if (!entry) break;
-      String n = String(entry.name());
-      entry.close();
-      int slash = n.lastIndexOf('/');
-      String base = slash >= 0 ? n.substring(slash + 1) : n;
-      if (isRecordingName(base)) count++;
-    }
-    dir.close();
-  }
-  return count;
-}
 
 // STAT notify. Text status lines are short (< MTU); no pacing delay — the
 // controller back-pressures via the notify() return, but for the handful of
 // STAT lines per command we just fire them.
 static void notifyStatus(const String &line) {
   if (!statChar) return;
+  // Bench visibility: F lines can be many; everything else is worth a log.
+  if (!line.startsWith("F\t")) Serial.printf("[ble>] %s", line.c_str());
   statChar->notify((const uint8_t *)line.c_str(), line.length(), connHandle);
 }
 
@@ -338,6 +349,10 @@ static void getPump() {
       break;
     }
     getNextSeq++;
+    if ((getNextSeq & 0xFF) == 0) {
+      Serial.printf("[ble] get %s: frame %lu/%lu\n", getName.c_str(),
+                    (unsigned long)getNextSeq, (unsigned long)getTotalFrames);
+    }
   }
   // EOF: all frames have been sent at least once → wait for cumulative ACKs.
   if (getNextSeq >= getTotalFrames) {
@@ -359,6 +374,7 @@ static void applyAckw(uint32_t nextAck, bool nak) {
   if (getState != GetState::Streaming && getState != GetState::Draining) return;
   if (nak) {
     // Rewind: resend from nextAck.
+    Serial.printf("[ble] NAK -> rewind to %lu\n", (unsigned long)nextAck);
     getNextSeq = nextAck;
     if (getNextSeq < getWinLo) getWinLo = getNextSeq;
     if (getState == GetState::Draining) getState = GetState::Streaming;
@@ -419,10 +435,12 @@ static void handleAck(const String &name) {
   }
   if (SD.exists(dst)) SD.remove(dst);
   if (SD.rename(src, dst)) {
+    SD.remove(src + ".crc");   // drop the CRC sidecar along with the entry
     notifyStatus(String("OK\t") + name + "\n");
     Serial.printf("BLE ack: %s -> uploaded\n", name.c_str());
-    // Queue shrank — refresh advertised PENDING bit/count.
-    bleSyncUpdatePending(countPending(), advBatteryPct);
+    // Queue shrank — decrement the advertised PENDING count (no directory
+    // walk; the count is maintained incrementally).
+    bleSyncUpdatePending(advPendingCount > 0 ? advPendingCount - 1 : 0, advBatteryPct);
   } else {
     notifyStatus(String("ERR\trename\t") + name + "\n");
   }
@@ -558,6 +576,10 @@ void bleSyncBegin(const String &deviceId) {
 
   NimBLEDevice::init(deviceId.c_str());
   NimBLEDevice::setMTU(517);  // request a large ATT MTU; iOS negotiates down
+  // 0 dBm (C6 default is +9): halves TX current per adv/connection event.
+  // Phone-in-pocket range has >20 dB of margin; bump to +3 if discovery
+  // range regresses in practice.
+  NimBLEDevice::setPower(0);
 
   // Just-Works bonding + LE Secure Connections (B.3). Bonds persist in NimBLE's
   // own NVS namespace across reboot; we never wipe ble_store except on factory
@@ -666,6 +688,10 @@ bool bleSyncPairing() { return pairingMode; }
 
 bool bleSyncBusy() { return connected && getState != GetState::Idle; }
 
+bool bleSyncLinkActive() { return connected; }
+
+uint32_t bleSyncPendingCount() { return advPendingCount; }
+
 void bleSyncSetDeviceId(const String &deviceId) {
   advName = deviceId;
   refreshAdvertising();
@@ -676,6 +702,7 @@ void bleSyncSetDeviceId(const String &deviceId) {
 // command dispatch
 // ===========================================================================
 static void dispatchCommand(const String &cmd) {
+  Serial.printf("[ble<] %s\n", cmd.c_str());
   // Split on tabs: verb [arg1 [arg2]].
   int t1 = cmd.indexOf('\t');
   String verb = t1 >= 0 ? cmd.substring(0, t1) : cmd;
@@ -687,7 +714,7 @@ static void dispatchCommand(const String &cmd) {
   arg1.trim();
   arg2.trim();
 
-  if (SD.cardType() == CARD_NONE) {
+  if (!sdEnsureMounted()) {
     notifyStatus("ERR\tnosd\t\n");
     return;
   }

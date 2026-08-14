@@ -6,6 +6,7 @@
 #include <freertos/stream_buffer.h>
 #include "pins.h"
 #include "config.h"
+#include "sd_mount.h"
 #include "button.h"
 #include "audio.h"
 #include "wav.h"
@@ -108,7 +109,7 @@ static void updatePendingAdvertising() {
 }
 
 static void startRecording() {
-  if (SD.cardType() == CARD_NONE) {
+  if (!sdEnsureMounted()) {
     Serial.println("No SD card; cannot record");
     return;
   }
@@ -161,23 +162,32 @@ static void stopRecording() {
   Serial.printf("Stopped, queued %s (%u bytes)\n", target.c_str(), (unsigned)total);
 
   // New pending file: set the PENDING adv bit + fast interval so the phone
-  // wakes and drains. (The CRC of the new file is computed lazily on LIST/GET
-  // and cached then — acceptable on the small pending queue.)
-  updatePendingAdvertising();
+  // wakes and drains. Increment the advertised count rather than re-walking
+  // /pending (which would need the SD card for a number we already know).
+  bleSyncUpdatePending(bleSyncPendingCount() + 1, batteryPct());
 }
 
 void setup() {
+  // 80 MHz is ample (audio filtering is a few hundred kcycles/s, SD SPI is
+  // 1 MHz, I2S is DMA) and cuts ~10 mA off the always-active baseline.
+  setCpuFrequencyMhz(80);
   Serial.begin(115200);
+  // Native USB-CDC re-enumerates after reset, so the host needs a moment to
+  // reopen the port. Wait (bounded) so boot logs aren't lost; the timeout
+  // keeps battery-powered boots from stalling when no host is attached.
+  uint32_t serialWaitStart = millis();
+  while (!Serial && millis() - serialWaitStart < 3000) delay(10);
   delay(200);
   Serial.println("\nPrawnd boot");
 
   buttonBegin();
+  audioParkPins();  // defined levels for the mic clock/data lines until recording
 
-  SPI.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
   // 16 kHz × 2ch × 2B = 64 KB/s of audio data — at 400 kHz SPI the card
   // tops out around 50 KB/s and DMA overruns produce robotic-sounding
-  // recordings. 1 MHz gives ~125 KB/s, comfortable headroom.
-  if (!SD.begin(PIN_SD_CS, SPI, 1000000)) {
+  // recordings. 1 MHz gives ~125 KB/s, comfortable headroom. (Bus speed is
+  // set in sd_mount.cpp; the card is lazily mounted and idles unmounted.)
+  if (!sdEnsureMounted()) {
     Serial.println("SD init failed");
   } else {
     Serial.printf("SD ok: %u MB total, %u MB free\n",
@@ -209,6 +219,24 @@ void setup() {
 }
 
 void loop() {
+  // Serial console. The board's physical RST drops native USB hard enough that
+  // the host may not re-enumerate without a replug; ESP.restart() keeps the
+  // USB-Serial/JTAG peripheral alive, so 'r' is the way to reboot at the bench.
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == 'r') {
+      Serial.println("[cmd] rebooting (software reset, USB stays up)");
+      delay(100);
+      ESP.restart();
+    } else if (c == '?') {
+      Serial.println("[cmd] r=reboot  ?=help");
+    }
+  }
+
+  // Unmount the SD card after idle (power); never while recording or while a
+  // phone is connected (an in-flight GET holds an open file handle).
+  sdIdleMaintain(state == State::Recording || bleSyncLinkActive());
+
   if (buttonLongPressed()) {
     Serial.println("Long press: factory reset");
     clearConfig();

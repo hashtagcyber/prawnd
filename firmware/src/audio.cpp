@@ -111,6 +111,17 @@ void audioEnd() {
     i2s_del_channel(rx_handle);
     rx_handle = nullptr;
   }
+  audioParkPins();
+}
+
+// Hold the mic lines at defined levels between recordings: after
+// i2s_del_channel the pins float, and a drifting BCLK/WS can keep the
+// INMP441s' input stages above their no-clock standby draw. audioBegin()
+// reclaims the pins for I2S on the next recording.
+void audioParkPins() {
+  pinMode(PIN_I2S_BCLK, OUTPUT); digitalWrite(PIN_I2S_BCLK, LOW);
+  pinMode(PIN_I2S_WS,   OUTPUT); digitalWrite(PIN_I2S_WS,   LOW);
+  pinMode(PIN_I2S_DIN,  INPUT_PULLDOWN);
 }
 
 void audioDropSettle() {

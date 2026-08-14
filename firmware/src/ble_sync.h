@@ -28,6 +28,13 @@ void bleSyncService();
 // True while a phone is connected AND a GET/transfer is active.
 bool bleSyncBusy();
 
+// True while any phone is connected (used to hold the SD card mounted).
+bool bleSyncLinkActive();
+
+// The currently advertised pending-recording count (single source of truth —
+// callers adjust it incrementally instead of re-walking /pending).
+uint32_t bleSyncPendingCount();
+
 // Open a ~60 s pairing window (triggered by a triple button press). New phones
 // can bond only during this window (no PIN — "Just Works"); outside it the
 // device still advertises and still accepts reconnections from already-bonded
