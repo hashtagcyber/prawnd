@@ -37,14 +37,18 @@ static void poll() {
     stableState = reading;
     if (stableState == LOW) {
       pressedAt = t;
+      Serial.println("[btn] down");
     } else {
       uint32_t dur = t - pressedAt;
       if (dur >= LONG_MS) {
+        Serial.printf("[btn] up after %lu ms -> long hold\n", (unsigned long)dur);
         longFlag = true;
         clickCount = 0;   // a long hold isn't part of a click burst
       } else {
         clickCount++;
         lastClickAt = t;
+        Serial.printf("[btn] up after %lu ms (click %u in burst)\n",
+                      (unsigned long)dur, clickCount);
       }
     }
   }
@@ -52,6 +56,8 @@ static void poll() {
   if (clickCount > 0 && (t - lastClickAt) > MULTICLICK_MS) {
     if (clickCount >= 3) tripleFlag = true;
     else                 shortFlag  = true;  // 1 or 2 clicks -> one short press
+    Serial.printf("[btn] gesture: %s (%u clicks)\n",
+                  clickCount >= 3 ? "triple" : "short", clickCount);
     clickCount = 0;
   }
 }
