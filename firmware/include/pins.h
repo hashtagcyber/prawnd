@@ -15,6 +15,10 @@ constexpr int PIN_SD_CS    = 21;  // D3
 // Button (active-low with internal pull-up)
 constexpr int PIN_BUTTON   = 17;  // D7
 
+// Recording indicator LED (external, D6 -> series resistor -> LED -> GND).
+// Driven HIGH while recording, LOW otherwise.
+constexpr int PIN_REC_LED  = 16;  // D6
+
 // Battery fuel gauge (optional addon — MAX17048 over I2C).
 // Only used when the firmware is built with -DENABLE_BATTERY
 // (the `xiao_esp32c6_batt` PlatformIO env). These are the XIAO's default

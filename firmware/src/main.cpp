@@ -4,6 +4,7 @@
 #include <NimBLEDevice.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/stream_buffer.h>
+#include <esp_pm.h>
 #include "pins.h"
 #include "config.h"
 #include "sd_mount.h"
@@ -108,6 +109,59 @@ static void updatePendingAdvertising() {
   bleSyncUpdatePending(countPending(), batteryPct());
 }
 
+// --- Power management (esp_pm automatic light sleep) -----------------------
+// Light sleep between BLE advertising events is the ~20 mA -> ~2 mA idle win.
+// It kills the native USB-Serial/JTAG link, so it's enabled only when no USB
+// host is attached: bench (USB) keeps the console, battery sleeps. While a
+// phone is connected we hold a NO_LIGHT_SLEEP lock so transfer throughput
+// stays up; the I2S driver holds its own PM lock during recording. Caveat:
+// a light-sleeping device can't enumerate USB — to get the console back,
+// plug in and reset (boot re-checks during the serial wait).
+static bool pmConfigured = false;
+static bool pmLightSleep = false;
+static esp_pm_lock_handle_t pmBleLock = nullptr;
+static bool pmBleLockHeld = false;
+
+static void pmApply(bool sleepWanted) {
+  // Always configure once at boot (enables DFS to min 40 MHz even on USB);
+  // afterwards only on USB attach/detach transitions.
+  if (pmConfigured && sleepWanted == pmLightSleep) return;
+  esp_pm_config_t pm = {};
+  pm.max_freq_mhz = 80;
+  pm.min_freq_mhz = 40;
+  pm.light_sleep_enable = sleepWanted;
+  esp_err_t err = esp_pm_configure(&pm);
+  if (err == ESP_OK) {
+    pmConfigured = true;
+    pmLightSleep = sleepWanted;
+    Serial.printf("[pm] light sleep %s\n",
+                  sleepWanted ? "ENABLED (no USB host)" : "disabled (USB attached)");
+  } else {
+    // ESP_ERR_NOT_SUPPORTED here means the libs were built without
+    // CONFIG_PM_ENABLE — the custom_sdkconfig rebuild didn't take.
+    Serial.printf("[pm] esp_pm_configure failed: %d\n", (int)err);
+  }
+}
+
+static void pmService() {
+  if (pmBleLock) {
+    bool link = bleSyncLinkActive();
+    if (link != pmBleLockHeld) {
+      if (link) esp_pm_lock_acquire(pmBleLock);
+      else      esp_pm_lock_release(pmBleLock);
+      pmBleLockHeld = link;
+    }
+  }
+  static uint32_t lastCheck = 0;
+  if (millis() - lastCheck < 1000) return;
+  lastCheck = millis();
+  // Gate on CABLE presence (HWCDC tracks USB frames), NOT on whether a
+  // terminal has the port open — usb_serial_jtag_is_connected() flips false
+  // when the port is merely closed, which put a bench-powered device to
+  // sleep with the cable in and bricked USB until replug.
+  pmApply(!Serial.isPlugged());
+}
+
 static void startRecording() {
   if (!sdEnsureMounted()) {
     Serial.println("No SD card; cannot record");
@@ -138,6 +192,7 @@ static void startRecording() {
   xTaskCreate(sdWriterTask,    "sd_wr",     4096, NULL, 5,  NULL);
 
   state = State::Recording;
+  digitalWrite(PIN_REC_LED, HIGH);
   Serial.printf("Recording -> %s\n", recPath.c_str());
 }
 
@@ -159,6 +214,7 @@ static void stopRecording() {
   String target = PENDING_DIR + "/" + String(millis()) + ".wav";
   SD.rename(recPath, target);
   state = State::Idle;
+  digitalWrite(PIN_REC_LED, LOW);
   Serial.printf("Stopped, queued %s (%u bytes)\n", target.c_str(), (unsigned)total);
 
   // New pending file: set the PENDING adv bit + fast interval so the phone
@@ -181,6 +237,8 @@ void setup() {
   Serial.println("\nPrawnd boot");
 
   buttonBegin();
+  pinMode(PIN_REC_LED, OUTPUT);
+  digitalWrite(PIN_REC_LED, LOW);  // recording indicator off until startRecording()
   audioParkPins();  // defined levels for the mic clock/data lines until recording
 
   // 16 kHz × 2ch × 2B = 64 KB/s of audio data — at 400 kHz SPI the card
@@ -215,6 +273,9 @@ void setup() {
   // Reflect the pending queue in the advertisement at boot.
   updatePendingAdvertising();
 
+  esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "ble_link", &pmBleLock);
+  pmApply(!Serial.isPlugged());
+
   state = State::Idle;
 }
 
@@ -236,6 +297,7 @@ void loop() {
   // Unmount the SD card after idle (power); never while recording or while a
   // phone is connected (an in-flight GET holds an open file handle).
   sdIdleMaintain(state == State::Recording || bleSyncLinkActive());
+  pmService();
 
   if (buttonLongPressed()) {
     Serial.println("Long press: factory reset");
