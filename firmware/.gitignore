@@ -1,0 +1,7 @@
+managed_components/
+dependencies.lock
+sdkconfig.defaults
+sdkconfig.xiao_esp32c6*
+CMakeLists.txt
+.dummy/
+.pio/
