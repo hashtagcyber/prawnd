@@ -555,7 +555,7 @@
 		(descr "Through hole straight pin header, 1x07, 2.54mm pitch, single row")
 		(tags "Through hole pin header THT 1x07 2.54mm single row")
 		(property "Reference" "J2"
-			(at 0 -2.38 270)
+			(at 0 18.2 270)
 			(layer "F.SilkS")
 			(uuid "e8659f75-aa20-4d73-9b42-de081fecabcb")
 			(effects
@@ -2132,7 +2132,7 @@
 		(descr "CP, Radial series, Radial, pin pitch=2.50mm, diameter=5mm, height=7mm, Electrolytic Capacitor")
 		(tags "CP Radial series Radial pin pitch 2.50mm diameter 5mm height 7mm Electrolytic Capacitor")
 		(property "Reference" "C3"
-			(at 1.25 -3.75 0)
+			(at 0 4.3 0)
 			(layer "F.SilkS")
 			(uuid "d544f553-b889-43ba-8aab-e48a491ea91b")
 			(effects
@@ -2143,7 +2143,7 @@
 			)
 		)
 		(property "Value" "10u"
-			(at 1.25 3.75 0)
+			(at 0 6.1 0)
 			(layer "F.Fab")
 			(uuid "b7d442d1-dd5b-4875-8e7d-f623779a025d")
 			(effects
@@ -3807,7 +3807,7 @@
 		(descr "C, Disc series, Radial, pin pitch=5.00mm, diameter*width=5*2.5mm^2, Capacitor, http://cdn-reichelt.de/documents/datenblatt/B300/DS_KERKO_TC.pdf")
 		(tags "C Disc series Radial pin pitch 5.00mm diameter 5mm width 2.5mm Capacitor")
 		(property "Reference" "C2"
-			(at 2.5 -2.5 0)
+			(at -4.5 0 0)
 			(layer "F.SilkS")
 			(uuid "274db766-adad-475e-8204-7717b72d9384")
 			(effects
@@ -4101,7 +4101,7 @@
 		(descr "Through hole straight pin header, 1x07, 2.54mm pitch, single row")
 		(tags "Through hole pin header THT 1x07 2.54mm single row")
 		(property "Reference" "J1"
-			(at 0 -2.38 270)
+			(at 0 18.2 270)
 			(layer "F.SilkS")
 			(uuid "42973fd0-acb4-4bb2-ba8f-6ee4ca9a1fc6")
 			(effects
@@ -34194,7 +34194,7 @@
 		(uuid "4900b316-c65b-4425-a4c6-efd07116451b")
 		(effects
 			(font
-				(size 0.7 0.7)
+				(size 0.8 0.6)
 				(thickness 0.13)
 			)
 		)
@@ -34205,7 +34205,7 @@
 		(uuid "c7a5c167-3c51-42f0-afef-c4a5bfe165b6")
 		(effects
 			(font
-				(size 0.7 0.7)
+				(size 0.8 0.6)
 				(thickness 0.13)
 			)
 		)
@@ -34216,7 +34216,7 @@
 		(uuid "c23e1a1d-526e-4f2d-a07a-95dc8cd577e2")
 		(effects
 			(font
-				(size 0.7 0.7)
+				(size 0.8 0.6)
 				(thickness 0.13)
 			)
 		)
@@ -34227,7 +34227,7 @@
 		(uuid "614a5e5c-e5ca-473a-97a3-69fcf5f97f66")
 		(effects
 			(font
-				(size 0.7 0.7)
+				(size 0.8 0.6)
 				(thickness 0.13)
 			)
 		)
@@ -34238,7 +34238,7 @@
 		(uuid "67439c1f-f27a-449d-9659-4e416de141b4")
 		(effects
 			(font
-				(size 0.7 0.7)
+				(size 0.8 0.6)
 				(thickness 0.13)
 			)
 		)
@@ -34249,7 +34249,7 @@
 		(uuid "acdfb854-8240-4d93-aafe-2efddf9e032a")
 		(effects
 			(font
-				(size 0.7 0.7)
+				(size 0.8 0.6)
 				(thickness 0.13)
 			)
 		)
@@ -34595,6 +34595,17 @@
 			)
 		)
 	)
+	(gr_text "10u"
+		(at 247 110.6 0)
+		(layer "F.SilkS")
+		(uuid "a4f79790-1e6d-423a-b1d9-9789a7226aa4")
+		(effects
+			(font
+				(size 0.8 0.8)
+				(thickness 0.13)
+			)
+		)
+	)
 	(gr_text "D0"
 		(at 249.5 81.3 0)
 		(layer "F.SilkS")
@@ -34617,19 +34628,8 @@
 			)
 		)
 	)
-	(gr_text "10u"
-		(at 250 104.5 0)
-		(layer "F.SilkS")
-		(uuid "a4f79790-1e6d-423a-b1d9-9789a7226aa4")
-		(effects
-			(font
-				(size 0.8 0.8)
-				(thickness 0.13)
-			)
-		)
-	)
 	(gr_text "LED"
-		(at 162.5 99.6 0)
+		(at 163.8 93.6 0)
 		(layer "F.SilkS")
 		(uuid "3ab3564e-6691-405b-aa26-cfd358c137e0")
 		(effects
@@ -34665,6 +34665,17 @@
 		(at 173.5 106 0)
 		(layer "F.SilkS")
 		(uuid "3aad2653-ce6d-40e7-b2b0-f7f4a776460b")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(gr_text "rev 2"
+		(at 220.527142 119 0)
+		(layer "F.SilkS")
+		(uuid "b8a7cd68-1e06-44e4-ba02-c6c3d8b9a747")
 		(effects
 			(font
 				(size 1 1)
