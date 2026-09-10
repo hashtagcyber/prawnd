@@ -6,9 +6,11 @@ constexpr int PIN_I2S_BCLK = 2;   // D2
 constexpr int PIN_I2S_WS   = 1;   // D1
 constexpr int PIN_I2S_DIN  = 0;   // D0
 
-// SD card (SPI)
-constexpr int PIN_SD_SCK   = 19;  // D8
-constexpr int PIN_SD_MISO  = 20;  // D9
+// SD card (SPI). SCK/MISO are swapped from the C6 defaults via the GPIO
+// matrix: carrier rev 2 routes J7 crossing-free this way. (Rev 1 boards and
+// the original point-to-point wiring used SCK=19/MISO=20.)
+constexpr int PIN_SD_SCK   = 20;  // D9
+constexpr int PIN_SD_MISO  = 19;  // D8
 constexpr int PIN_SD_MOSI  = 18;  // D10
 constexpr int PIN_SD_CS    = 21;  // D3
 

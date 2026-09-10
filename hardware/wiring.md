@@ -3,8 +3,12 @@
 ## Bill of materials
 - 1× Seeed Studio XIAO ESP32C6
 - 2× INMP441 I²S MEMS microphone breakout
-- 1× 6-pin micro-SD SPI card adapter (3.3 V variant)
+- 1× 6-pin micro-SD SPI card adapter — mini 3.3 V variant, pin order
+  `GND MISO CLK MOSI CS 3V3`, **no onboard regulator/level shifter** (the
+  5 V "HW-125"/Catalex modules with an AMS1117 + 74LVC125 will NOT run from
+  3.3 V — the card browns out and never answers)
 - 1× momentary push-button (any small tactile switch)
+- 1× LED (recording indicator) + 1× 330 Ω–1 kΩ series resistor
 - 2× 100 nF ceramic capacitors (decoupling, one per mic)
 - A short jumper wire from `3V3` to one mic's `L/R` and from `GND` to the other's `L/R`
 - *(optional)* 1× MAX17048 LiPo fuel-gauge breakout + a single-cell LiPo — only for the battery-monitoring addon (see [Battery fuel gauge](#battery-fuel-gauge--max17048-optional-addon))
@@ -14,15 +18,16 @@
 | XIAO pin | GPIO | Direction | Connects to | Notes |
 |---|---|---|---|---|
 | `3V3` | — | PWR out | both mics' VDD, SD VCC, Mic-R L/R | 100 nF cap close to each mic's VDD. SD adapter must be 3.3 V. |
-| `GND` | — | GND | every peripheral GND, button's other leg, Mic-L L/R | Star ground at the XIAO if layout allows. |
+| `GND` | — | GND | every peripheral GND, button's other leg, LED cathode, Mic-L L/R | Star ground at the XIAO if layout allows. |
 | `D2` | 2 | OUT | I²S BCLK → both mics' SCK | Shared. |
 | `D1` | 1 | OUT | I²S WS / LRCLK → both mics' WS | Shared. |
 | `D0` | 0 | IN  | I²S DIN ← both mics' SD (tied together) | Shared data line; the L/R pins tri-state each mic on the opposite slot. |
-| `D8` | 19 | OUT | SD CLK (a.k.a. SCK) | Default SPI clock on the C6. |
-| `D9` | 20 | IN  | SD MISO (a.k.a. DO) | Default SPI MISO. |
+| `D8` | 19 | IN  | SD MISO (a.k.a. DO) | Swapped from the C6 default via GPIO matrix — gives carrier rev 2 crossing-free routing. |
+| `D9` | 20 | OUT | SD CLK (a.k.a. SCK) | Swapped from the C6 default (see above). |
 | `D10` | 18 | OUT | SD MOSI (a.k.a. DI) | Default SPI MOSI. |
 | `D3` | 21 | OUT | SD CS | Software-controlled. |
 | `D7` | 17 | IN  | Button (other leg → GND) | Firmware sets `INPUT_PULLUP`, active-low. |
+| `D6` | 16 | OUT | Recording LED (via series resistor → LED anode; cathode → GND) | Driven HIGH only while recording. |
 | `D4` | 22 | I/O | Fuel-gauge SDA *(optional)* | I²C data — **only** for the battery-monitoring addon. Unused by the base firmware. |
 | `D5` | 23 | I/O | Fuel-gauge SCL *(optional)* | I²C clock — **only** for the battery-monitoring addon. Unused by the base firmware. |
 
@@ -129,8 +134,8 @@ flowchart LR
     end
     X3V3 --- SV
     XGND --- SG
-    XD8 --- SK
-    XD9 --- SMI
+    XD9 --- SK
+    XD8 --- SMI
     XD10 --- SMO
     XD3 --- SC
 ```
@@ -138,11 +143,20 @@ flowchart LR
 ```
 microSD      VCC      --- 3V3      (3.3V variant adapter — confirm silkscreen)
              GND      --- GND
-             CLK/SCK  --- D8       (GPIO19, SPI SCK)
-             MISO/DO  --- D9       (GPIO20, SPI MISO)
+             CLK/SCK  --- D9       (GPIO20, SPI SCK)
+             MISO/DO  --- D8       (GPIO19, SPI MISO)
              MOSI/DI  --- D10      (GPIO18, SPI MOSI)
              CS       --- D3       (GPIO21)
 ```
+
+Carrier-board note: the J7 header on carrier **rev 2** is ordered
+`GND MISO CLK MOSI CS 3V3` (pin 1 → 6) so the mini 3.3 V module drops
+straight in, and SCK/MISO are swapped onto GPIO20/GPIO19 (the C6's GPIO
+matrix doesn't care) so all three SPI data lines route as parallel traces
+with no crossing. Rev 1 boards (first OSH Park run) used the HW-125-style
+order `GND VCC MISO MOSI SCK CS` with SCK=GPIO19/MISO=GPIO20 — current
+firmware does NOT run rev 1's SD without swapping those two wires or
+reverting the two pins in `firmware/include/pins.h`.
 
 ### Button
 
@@ -160,6 +174,31 @@ flowchart LR
 ```
 Push button  leg A    --- D7       (GPIO17, INPUT_PULLUP in firmware)
              leg B    --- GND
+```
+
+### Recording LED
+
+Lit while the device is recording (`State::Recording`), off otherwise. Any
+plain LED works; pick the resistor for the brightness you want (330 Ω ≈ 5 mA
+at 3.3 V for a red LED, 1 kΩ ≈ 1.5 mA — a fine "is it running" glow and
+gentler on the battery).
+
+```mermaid
+flowchart LR
+    subgraph XIAO[XIAO ESP32C6]
+        XGND[GND]
+        XD6[D6 / GPIO16]
+    end
+    R[330 Ω – 1 kΩ]
+    LED>LED]
+    XD6 --- R
+    R --- LED
+    LED --- XGND
+```
+
+```
+LED   anode (+)  --- resistor --- D6   (GPIO16, HIGH while recording)
+      cathode (-) --- GND
 ```
 
 ### Battery fuel gauge — MAX17048 (optional addon)
@@ -221,10 +260,10 @@ Notes:
                     +-----------------------+
               3V3 --|                       |-- GND
    I2S DIN    D0 --|  (USB-C at this edge) |-- D10  SD MOSI/DI
-   I2S WS     D1 --|                       |-- D9   SD MISO/DO
-   I2S BCLK   D2 --|                       |-- D8   SD CLK/SCK
+   I2S WS     D1 --|                       |-- D9   SD CLK/SCK
+   I2S BCLK   D2 --|                       |-- D8   SD MISO/DO
    SD CS      D3 --|                       |-- D7   BUTTON
-  SDA (opt)   D4 --|                       |-- D6
+  SDA (opt)   D4 --|                       |-- D6   REC LED
   SCL (opt)   D5 --|                       |
                     +-----------------------+
 ```
