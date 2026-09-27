@@ -43,7 +43,7 @@ static const char *STAT_UUID = "e2c50002-7c6e-4f1d-9b1a-9b6a4f2d8a01";
 static const char *DATA_UUID = "e2c50003-7c6e-4f1d-9b1a-9b6a4f2d8a01";
 static const char *CFG_UUID  = "e2c50004-7c6e-4f1d-9b1a-9b6a4f2d8a01";
 
-static const char *FW_VERSION = "2.0.0";
+static const char *FW_VERSION = "2.0.1";
 static const uint8_t PROTO_VER = 0x02;
 
 // Advertising flag bits (mfg-data byte[1], spec B.2).
@@ -266,10 +266,30 @@ static uint32_t computeChunk() {
   return c;
 }
 
+// How long a GET may sit with no ACKW progress before it is considered
+// abandoned (spec B.6). The phone's own inactivity watchdog is 5 s, so by
+// 10 s it has either NAKed, aborted, or moved on.
+static const uint32_t GET_STALL_MS = 10000;
+
 static void handleGet(const String &name, uint32_t offset) {
   if (getState != GetState::Idle) {
-    notifyStatus(String("ERR\tbusy\t") + name + "\n");
-    return;
+    // The phone issues GETs strictly one at a time, so a new GET means it
+    // considers the previous transfer finished. It finishes a file as soon
+    // as the last byte lands, often before its final cumulative ACKW would
+    // have gone out, which used to strand us in Draining and reject every
+    // subsequent GET with "busy" until the link dropped. Recover instead of
+    // refusing when the old transfer is clearly over: all frames already
+    // sent (Draining), same file re-requested (resume/retry), or no ACKW
+    // progress for GET_STALL_MS.
+    bool stale = getState == GetState::Draining || getName == name ||
+                 (millis() - getLastProgress) >= GET_STALL_MS;
+    if (!stale) {
+      notifyStatus(String("ERR\tbusy\t") + name + "\n");
+      return;
+    }
+    Serial.printf("[ble] GET %s supersedes unfinished GET %s\n",
+                  name.c_str(), getName.c_str());
+    getReset();
   }
   if (!validName(name)) {
     notifyStatus(String("ERR\tbadname\t") + name + "\n");
@@ -426,6 +446,13 @@ static void handleAck(const String &name) {
   if (!validName(name)) {
     notifyStatus(String("ERR\tbadname\t") + name + "\n");
     return;
+  }
+  // ACK of the file we're still draining: the phone has verified and stored
+  // it, so the GET is done. Clear it (and close the handle — renaming an open
+  // file is not allowed) rather than leaving a stranded transfer behind.
+  if (getState != GetState::Idle && getName == name) {
+    Serial.printf("[ble] ACK %s closes its in-flight GET\n", name.c_str());
+    getReset();
   }
   String src = String(PENDING_DIR) + "/" + name;
   String dst = String(UPLOADED_DIR) + "/" + name;
@@ -778,10 +805,16 @@ void bleSyncService() {
   getPump();
   getDrain();
 
-  // Device guard (B.6): if the window has stalled (no ACKW progress for 10 s)
-  // there is nothing to do — getPump() naturally idles once the window fills,
-  // and the phone's watchdog will ABORT/disconnect (→ getReset). No data is
-  // lost; the file stays in /pending. (No active intervention required here.)
+  // Device guard (B.6): a GET with no ACKW progress for GET_STALL_MS is
+  // abandoned — the phone has NAKed/aborted/moved on by then. Reset it so the
+  // BUSY adv flag and bleSyncBusy() clear even if no further command arrives.
+  // No data is lost; the file stays in /pending.
+  if (getState != GetState::Idle && (millis() - getLastProgress) >= GET_STALL_MS) {
+    Serial.printf("[ble] GET %s stalled %lu ms — abandoning\n", getName.c_str(),
+                  (unsigned long)(millis() - getLastProgress));
+    notifyStatus(String("GA\t") + getName + "\n");
+    getReset();
+  }
 
   // --- apply one pending text command ---
   if (!hasCmd) return;
