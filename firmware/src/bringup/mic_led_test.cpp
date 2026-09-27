@@ -143,6 +143,16 @@ void loop() {
     first = false;
   }
 
+  // Raw word dump every ~2 s: 16 consecutive slot words (L,R,L,R...) in hex,
+  // so a misframed / non-mic bit pattern can be recognised directly.
+  static uint32_t lastDump = 0;
+  if (millis() - lastDump > 2000) {
+    lastDump = millis();
+    Serial.print("[raw]");
+    for (int i = 0; i < 16; i++) Serial.printf(" %08lx", (unsigned long)(uint32_t)buf[i]);
+    Serial.println();
+  }
+
   int32_t rms[2];
   char bars[2][21];
   for (int k = 0; k < 2; k++) {
